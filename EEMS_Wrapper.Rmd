@@ -1,0 +1,143 @@
+---
+title: "EEMS Pipeline"
+author: "Henry Sanford"
+date: '2022-05-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape) # for calculating pairwise distances
+library(TreeTools) # for reading nexus files
+library(readxl)
+library(phylotools)
+library(rEEMSplots)
+library(rgdal)
+library(graphics)
+library(sf)
+library(ggplot2)
+library(dplyr)
+```
+
+## Specifying files
+
+```{r}
+# Name of species or group, used to name input files
+input_name <- "coleonyx"
+# Where to store input files for the EEMS run
+input_directory <- '/media/digitalstorm/Storage1/hayden/coleonyx/EEMS/input'
+# Coordinates file, which must have "Catalogue", "lat" and "lon" columns
+coordinates <- "/media/digitalstorm/Storage1/hayden/coleonyx/EEMS/data/geolocation.xlsx"
+# Nexus file path
+nexus <- "/media/digitalstorm/Storage1/hayden/coleonyx/coleonyx_noout_outfiles/coleonyx_thin.recode.min4.nexus"
+```
+
+## Creating dissimilarity matrix
+
+```{r}
+seqs <- ReadCharacters(nexus)
+seqmatrix <- as.matrix(seqs)
+dist <- dist.gene(seqmatrix, method = "percentage")
+matrix <-as.matrix(dist)
+heatmap(matrix) # visualize pairwise distances as a heatmap
+```
+# Create a table of coordinates with the same order as the sequence matrix
+Any samples not present in the coordinates file will be dropped
+```{r}
+identifiers <- rownames(as.data.frame(seqs[,0]))
+coords <- read_excel(coordinates)
+coords <- coords[match(identifiers, coords$Catalogue),]
+plot(coords[c("lat", "lon")]) # Plot to check accuracy
+```
+
+## Creating boundary box
+
+The boundary box should be made in Google Earth Pro. 
+1. Import the coordinates
+2. Add > Polygon and draw a polygon around the coordinates
+3. Copy and Paste the polygon to a text file
+4. Edit to only include the coordinates, in the order latitude, longitude
+5. Coordinates should be separated by spaces, not commas
+6. Save as *your input name*.boundary to the input directory
+
+## Create files for EEMS run
+Write all the coordinates and sequence matrix to the input directory
+
+```{r}
+if (!dir.exists(input_directory)){
+  dir.create(input_directory)
+}
+write.table(matrix, file=paste(input_directory, "/", input_name, ".diffs", sep=""), row.names=FALSE, col.names=FALSE)
+write.table(coords, file=paste(input_directory, "/", input_name, ".coord", sep=""), row.names=FALSE, col.names=FALSE)
+```
+
+## Write parameters to params.ini
+```{r}
+mcmcpath = "path"
+numBurnIter = 10000000
+numMCMCIter = 50000000
+numThinIter = 9999
+diploid = "false"
+datapath = "input/coleonyx"
+nDemes = 500
+nIndiv = nrow(coords)
+nSites = length(seqs[1,])
+parameter_names <- c("datapath","mcmcpath","nIndiv","nSites","nDemes","diploid","numMCMCIter","numBurnIter","numThinIter")
+parameter_values <- c(datapath, mcmcpath, nIndiv, nSites, nDemes, diploid, numMCMCIter, numBurnIter, numThinIter)
+params <- cbind(parameter_names, parameter_values)
+write.table(params, col.names = FALSE, row.names = FALSE, file = "test_params.ini", sep = " = ", quote = FALSE)
+```
+
+## Run EEMS from the console
+
+Edit params.ini to correct nIndiv, nSites
+Use nSites from the nexus file
+Use nIndiv from the coordinates file
+Set mcmcpath to an empty directory to store results
+
+From the terminal: 
+../runeems_snps --params params.ini 
+
+## Change coordinate projections for plotting
+
+```{r}
+projection_none <- "+proj=longlat +datum=WGS84"
+projection_mercator <- "+proj=merc +datum=WGS84"
+coords_longlat = coords[,c(2,1)]
+plot(coords_longlat)
+# Create an sf object from coordinates
+sf <- st_as_sf(x = coords_longlat, coords = c("lon","lat"), crs = CRS(projection_none))
+# Transform to the Mercator projection
+sf_merc <- st_transform(x = sf, crs = CRS(projection_mercator))
+# Extract coordinates from SF object
+coords_merc <- as.matrix(st_coordinates(sf_merc))
+plot(coords_merc)
+```
+
+
+## Plot results!
+
+```{r}
+assem_direc <- paste0(run_directory, threshold)
+plot_figs <- function(chain_dir){
+  figure_path <- file.path(assem_direc, "figures")
+  figure_name <- paste0(figure_path, '/', assem_direc, '_', chain_dir)
+  print(figure_name)
+  eems_plot <- eems.plots(mcmcpath = paste(run_directory, threshold, "/out/", chain_dir, sep=""),
+   plotpath = figure_name,  
+   m.plot.xy = {
+     points(coords_merc, col = "purple");
+   },
+   q.plot.xy = {
+     points(coords_merc, col = "purple");
+   },
+   projection.in = projection_none,
+   projection.out = projection_mercator,
+   longlat = FALSE,
+   out.png = TRUE, 
+   add.map = TRUE)
+}
+plot_figs("chain1")
+plot_figs("chain2")
+```
+
