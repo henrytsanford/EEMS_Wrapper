@@ -90,12 +90,6 @@ write.table(params, col.names = FALSE, row.names = FALSE, file = "test_params.in
 
 ## Run EEMS from the console
 
-Edit params.ini to correct nIndiv, nSites
-Use nSites from the nexus file
-Use nIndiv from the coordinates file
-Set mcmcpath to an empty directory to store results
-
-From the terminal: 
 ../runeems_snps --params params.ini 
 
 ## Change coordinate projections for plotting
